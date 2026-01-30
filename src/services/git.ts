@@ -48,7 +48,7 @@ export class GitService {
     return status.staged.length > 0;
   }
 
-   // Get current branch name
+  // Get current branch name
   async getCurrentBranch(): Promise<string> {
     const status = await this.git.status();
     return status.current || 'main';
@@ -75,13 +75,13 @@ export class GitService {
   async getCommitsSinceBase(): Promise<Array<{ hash: string; message: string; author: string; date: string }>> {
     const currentBranch = await this.getCurrentBranch();
     const baseBranch = await this.getBaseBranch();
-    
+
     try {
       const log = await this.git.log({
         from: baseBranch,
         to: currentBranch
       });
-      
+
       return log.all.map(commit => ({
         hash: commit.hash.substring(0, 7),
         message: commit.message,
@@ -99,6 +99,21 @@ export class GitService {
     const branchMatch = this.git.branch().then(b => b.current?.match(/-(\d+)$/));
     // For now, return null (we'll enhance this later)
     return null;
+  }
+
+  // Check if current branch exists on remote
+  async isBranchPushed(branchName: string): Promise<boolean> {
+    try {
+      const result = await this.git.raw(['ls-remote', '--heads', 'origin', branchName]);
+      return result.trim().length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  // Push current branch to remote
+  async pushBranch(branchName: string): Promise<void> {
+    await this.git.push('origin', branchName, ['--set-upstream']);
   }
 
 }
