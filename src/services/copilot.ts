@@ -1,52 +1,57 @@
 import { exec } from 'child_process';
+import { unlinkSync, writeFileSync } from 'fs';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
 export class CopilotService {
+
+
   async generateCommitMessage(diff: string): Promise<string[]> {
     try {
-      // Use a simpler, more direct prompt
-      const prompt = `Generate 3 commit messages for these changes. Use conventional commits format.
+      // Simple prompt
+      const prompt = `Generate 3 commit messages for these git changes. Use conventional commits format (feat/fix/chore/etc).
+  
+  Changes:
+  ${diff.substring(0, 2000)}
+  
+  Respond with 3 options:
+  1. [first message]
+  2. [second message]
+  3. [third message]
+  
+  Keep each under 72 characters.`;
 
-Changes:
-${diff.substring(0, 2000)}
-
-Format each as: "type: description"
-Keep under 72 characters.`;
-
-      // Escape the prompt properly
-      const escapedPrompt = prompt
-        .replace(/\\/g, '\\\\')
-        .replace(/"/g, '\\"')
-        .replace(/\n/g, '\\n')
-        .replace(/\r/g, '\\r')
-        .replace(/\t/g, '\\t');
+      // Write to temp file to avoid shell escaping issues
+      const tmpFile = `/tmp/devflow-commit-${Date.now()}.txt`;
+      writeFileSync(tmpFile, prompt);
 
       console.log('\n🤖 Calling Copilot CLI...\n');
 
-      // Call copilot with proper escaping
+      // Use --prompt with file input
       const { stdout } = await execAsync(
-        `copilot -p "${escapedPrompt}" 2>/dev/null || echo "feat: update code
-fix: resolve issue  
-chore: update files"`,
-        { 
+        `copilot --prompt "$(cat ${tmpFile})"`,
+        {
           maxBuffer: 1024 * 1024,
-          timeout: 30000
+          timeout: 30000,
+          shell: '/bin/bash'
         }
       );
+
+      // Clean up
+      try { unlinkSync(tmpFile); } catch { }
+
       // Parse messages
       const messages = this.parseCommitMessages(stdout);
-      
+
       if (messages.length > 0) {
         return messages;
       }
 
-      // Fallback
       return this.generateFallbackMessages(diff);
 
     } catch (error) {
-      console.log('⚠️  Copilot CLI timeout or error, using fallback');
+      console.log('⚠️ Copilot error:', (error as Error).message);
       return this.generateFallbackMessages(diff);
     }
   }
@@ -62,7 +67,7 @@ chore: update files"`,
 
   private parseCommitMessages(response: string): string[] {
     const messages: string[] = [];
-    
+
     // Split by lines
     const lines = response
       .split('\n')
@@ -71,7 +76,7 @@ chore: update files"`,
 
     for (const line of lines) {
       // Try multiple patterns
-      
+
       // Pattern 1: "1. message" or "1) message"
       let match = line.match(/^\d+[\.)]\s*(.+)$/);
       if (match) {
@@ -101,67 +106,128 @@ chore: update files"`,
     const lines = diff.split('\n');
     const added = lines.filter(l => l.startsWith('+')).length;
     const removed = lines.filter(l => l.startsWith('-')).length;
-    
+
     return [
       `feat: update files (+${added} -${removed})`,
       `fix: improve code quality`,
       `chore: update documentation`
     ];
   }
-  // Generate PR description
+
   async generatePRDescription(
     commits: Array<{ hash: string; message: string; author: string; date: string }>,
     issueContext: string = ''
   ): Promise<{ title: string; body: string }> {
     try {
-      const commitList = commits.map(c => `- ${c.message} (${c.hash})`).join('\n');
-      
-      const prompt = `Generate a comprehensive pull request description based on these commits.
+      const commitList = commits.map(c => `- ${c.message}`).join('\n');
 
-Commits:
-${commitList}
-${issueContext}
+      // Shorter, simpler prompt
+      const prompt = `Generate a PR title and description for these commits:\n${commitList}\n\nFormat:\nTITLE: [title]\nBODY:\n[description]`;
 
-Create:
-1. A concise PR title (under 72 characters)
-2. A detailed PR description with these sections:
-   ## Summary
-   (What changed and why)
-   
-   ## Changes
-   (Bullet points of key changes)
-   
-   ## Testing
-   (How to test these changes)
-   
-${issueContext ? '## Related Issues\n(Link to related issues)\n\n' : ''}
+      console.log('\n🤖 Asking Copilot CLI...\n');
 
-Format the response as:
-TITLE: [pr title here]
-BODY:
-[pr description here]`;
-
+      // Use --prompt flag (non-interactive)
       const escapedPrompt = prompt
         .replace(/\\/g, '\\\\')
         .replace(/"/g, '\\"')
         .replace(/\n/g, '\\n');
 
-      const { stdout } = await execAsync(
-        `copilot -p "${escapedPrompt}" 2>/dev/null`,
-        { 
+      const { stdout, stderr } = await execAsync(
+        `copilot --prompt "${escapedPrompt}"`,
+        {
           maxBuffer: 1024 * 1024,
-          timeout: 30000
+          timeout: 30000,
+          shell: '/bin/bash'
         }
       );
 
-      return this.parsePRDescription(stdout);
+      console.log('Raw response:');
+      console.log(stdout);
+      console.log('---\n');
+
+      if (stderr) {
+        console.log('Stderr:', stderr);
+      }
+
+      // Parse response
+      const parsed = this.parsePRDescription(stdout);
+
+      if (parsed.title && parsed.body && parsed.body.length > 50) {
+        return parsed;
+      }
+
+      // If parsing gave weak results, use fallback
+      console.log('⚠️ Weak response, using fallback\n');
+      return this.generateSmartFallback(commits, issueContext);
 
     } catch (error) {
-      // Fallback PR description
-      return this.generateFallbackPR(commits, issueContext);
+      console.log('⚠️ Copilot error:', (error as Error).message);
+      console.log('Using smart fallback\n');
+      return this.generateSmartFallback(commits, issueContext);
     }
   }
 
+  private generateSmartFallback(
+    commits: Array<{ hash: string; message: string }>,
+    issueContext: string
+  ): { title: string; body: string } {
+    // Use first commit as title if it's good
+    const title = commits[0]?.message || 'Update';
+
+    // Group commits by type
+    const features = commits.filter(c => c.message.startsWith('feat'));
+    const fixes = commits.filter(c => c.message.startsWith('fix'));
+    const chores = commits.filter(c => c.message.startsWith('chore'));
+    const others = commits.filter(c => !c.message.match(/^(feat|fix|chore)/));
+
+    let body = '## Summary\n\n';
+
+    if (commits.length === 1) {
+      body += commits[0].message;
+    } else {
+      body += `This PR includes ${commits.length} commits with `;
+      const types = [];
+      if (features.length) types.push(`${features.length} feature(s)`);
+      if (fixes.length) types.push(`${fixes.length} fix(es)`);
+      if (chores.length) types.push(`${chores.length} chore(s)`);
+      body += types.join(', ') || 'various changes';
+      body += '.';
+    }
+
+    body += '\n\n## Changes\n\n';
+
+    if (features.length) {
+      body += '### Features\n';
+      features.forEach(c => body += `- ${c.message}\n`);
+      body += '\n';
+    }
+
+    if (fixes.length) {
+      body += '### Fixes\n';
+      fixes.forEach(c => body += `- ${c.message}\n`);
+      body += '\n';
+    }
+
+    if (chores.length) {
+      body += '### Chores\n';
+      chores.forEach(c => body += `- ${c.message}\n`);
+      body += '\n';
+    }
+
+    if (others.length) {
+      body += '### Other Changes\n';
+      others.forEach(c => body += `- ${c.message}\n`);
+      body += '\n';
+    }
+
+    if (issueContext) {
+      body += `\n${issueContext}\n`;
+    }
+
+    body += '\n## Testing\n\nPlease test these changes in your environment.\n';
+
+    return { title, body };
+  }
   private parsePRDescription(response: string): { title: string; body: string } {
     // Try to extract title and body
     const titleMatch = response.match(/TITLE:\s*(.+)/i);
@@ -187,7 +253,7 @@ BODY:
     issueContext: string
   ): { title: string; body: string } {
     const title = commits[0]?.message || 'Update code';
-    
+
     const body = `## Summary
 This PR includes ${commits.length} commit(s).
 
