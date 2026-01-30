@@ -19,6 +19,7 @@
     "commander": "^14.0.2",
     "dotenv": "^17.2.3",
     "inquirer": "^13.2.1",
+    "keytar": "^7.9.0",
     "ora": "^9.1.0",
     "simple-git": "^3.30.0"
   },

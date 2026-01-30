@@ -1,6 +1,7 @@
 import { exec } from 'child_process';
 import { unlinkSync, writeFileSync } from 'fs';
 import { promisify } from 'util';
+import { ConfigService } from './config';
 
 const execAsync = promisify(exec);
 
@@ -26,11 +27,17 @@ export class CopilotService {
       const tmpFile = `/tmp/devflow-commit-${Date.now()}.txt`;
       writeFileSync(tmpFile, prompt);
 
+      const configService = new ConfigService();
+      const model = configService.getCopilotModel();
+
+      // Build the command with model flag only if it's not the default
+      const modelFlag = model ? `--model ${model}` : '';
+
       console.log('\n🤖 Calling Copilot CLI...\n');
 
       // Use --prompt with file input
       const { stdout } = await execAsync(
-        `copilot --prompt "$(cat ${tmpFile})"`,
+        `copilot ${modelFlag} --prompt "$(cat ${tmpFile})"`,
         {
           maxBuffer: 1024 * 1024,
           timeout: 30000,
