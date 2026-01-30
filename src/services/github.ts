@@ -11,20 +11,39 @@ export class GitHubService {
 
   constructor() {
     // Get token from environment
-    const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+    // Try multiple sources for token
+    let token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
     
+    // If no token in env, try to get from gh CLI
     if (!token) {
-      throw new Error('GitHub token not found. Set GITHUB_TOKEN or GH_TOKEN environment variable.');
+      try {
+        const { execSync } = require('child_process');
+        token = execSync('gh auth token', { encoding: 'utf-8' }).trim();
+      } catch {
+        throw new Error('GitHub token not found. Either:\n  1. Set GITHUB_TOKEN in .env\n  2. Run: gh auth login');
+      }
     }
 
     this.octokit = new Octokit({ auth: token });
+    
   }
 
   // Initialize repo info from git remote
-  async init(): Promise<void> {
+// Initialize repo info from git remote
+async init(): Promise<void> {
     try {
       const { stdout } = await execAsync('git remote get-url origin');
-      const match = stdout.match(/github\.com[:/](.+?)\/(.+?)(\.git)?$/);
+      const url = stdout.trim();
+      
+      let match;
+      
+      // Try SSH format: git@github.com:user/repo.git
+      match = url.match(/git@github\.com:(.+?)\/(.+?)(\.git)?$/);
+      
+      if (!match) {
+        // Try HTTPS format: https://github.com/user/repo.git
+        match = url.match(/github\.com[:/](.+?)\/(.+?)(\.git)?$/);
+      }
       
       if (match) {
         this.owner = match[1];

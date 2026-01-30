@@ -3,8 +3,11 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { commitCommand } from './commands/commit.js';
+import { prCommand } from './commands/pr.js';  // ADD THIS
 
 const program = new Command();
+
+import 'dotenv/config';  // ADD THIS LINE - loads .env automatically
 
 program
   .name('devflow')
@@ -13,6 +16,7 @@ program
 
 // Register commands
 program.addCommand(commitCommand);
+program.addCommand(prCommand);  // ADD THIS
 
 // Help message
 if (process.argv.length === 2) {

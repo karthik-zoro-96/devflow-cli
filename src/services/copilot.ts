@@ -108,4 +108,97 @@ chore: update files"`,
       `chore: update documentation`
     ];
   }
+  // Generate PR description
+  async generatePRDescription(
+    commits: Array<{ hash: string; message: string; author: string; date: string }>,
+    issueContext: string = ''
+  ): Promise<{ title: string; body: string }> {
+    try {
+      const commitList = commits.map(c => `- ${c.message} (${c.hash})`).join('\n');
+      
+      const prompt = `Generate a comprehensive pull request description based on these commits.
+
+Commits:
+${commitList}
+${issueContext}
+
+Create:
+1. A concise PR title (under 72 characters)
+2. A detailed PR description with these sections:
+   ## Summary
+   (What changed and why)
+   
+   ## Changes
+   (Bullet points of key changes)
+   
+   ## Testing
+   (How to test these changes)
+   
+${issueContext ? '## Related Issues\n(Link to related issues)\n\n' : ''}
+
+Format the response as:
+TITLE: [pr title here]
+BODY:
+[pr description here]`;
+
+      const escapedPrompt = prompt
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, '\\n');
+
+      const { stdout } = await execAsync(
+        `copilot -p "${escapedPrompt}" 2>/dev/null`,
+        { 
+          maxBuffer: 1024 * 1024,
+          timeout: 30000
+        }
+      );
+
+      return this.parsePRDescription(stdout);
+
+    } catch (error) {
+      // Fallback PR description
+      return this.generateFallbackPR(commits, issueContext);
+    }
+  }
+
+  private parsePRDescription(response: string): { title: string; body: string } {
+    // Try to extract title and body
+    const titleMatch = response.match(/TITLE:\s*(.+)/i);
+    const bodyMatch = response.match(/BODY:\s*([\s\S]+)/i);
+
+    if (titleMatch && bodyMatch) {
+      return {
+        title: this.stripMarkdown(titleMatch[1].trim()),
+        body: bodyMatch[1].trim()
+      };
+    }
+
+    // If parsing fails, use first line as title, rest as body
+    const lines = response.split('\n').filter(l => l.trim().length > 0);
+    return {
+      title: this.stripMarkdown(lines[0] || 'Update'),
+      body: lines.slice(1).join('\n') || 'Pull request description'
+    };
+  }
+
+  private generateFallbackPR(
+    commits: Array<{ hash: string; message: string }>,
+    issueContext: string
+  ): { title: string; body: string } {
+    const title = commits[0]?.message || 'Update code';
+    
+    const body = `## Summary
+This PR includes ${commits.length} commit(s).
+
+## Changes
+${commits.map(c => `- ${c.message}`).join('\n')}
+
+${issueContext ? `## Related Issues\n${issueContext}` : ''}
+
+## Testing
+Please test the changes thoroughly.`;
+
+    return { title, body };
+  }
 }
