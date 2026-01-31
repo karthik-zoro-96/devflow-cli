@@ -118,13 +118,23 @@ export class GitHubService {
         return { owner: this.owner, repo: this.repo };
     }
 
-    // Parse GitHub remote URL to get owner and repo
     private parseRemoteUrl(): { owner: string; repo: string } {
         try {
             const { execSync } = require('child_process');
             const remoteUrl = execSync('git config --get remote.origin.url', {
                 encoding: 'utf-8'
             }).trim();
+
+            console.log('Debug - Remote URL:', remoteUrl); // ADD THIS FOR DEBUGGING
+
+            // Handle SSH format with custom host: git@github-personal:owner/repo.git
+            const sshCustomMatch = remoteUrl.match(/git@([^:]+):(.+?)\/(.+?)(\.git)?$/);
+            if (sshCustomMatch) {
+                return {
+                    owner: sshCustomMatch[2],
+                    repo: sshCustomMatch[3]
+                };
+            }
 
             // Handle SSH format: git@github.com:owner/repo.git
             const sshMatch = remoteUrl.match(/git@github\.com:(.+?)\/(.+?)(\.git)?$/);
@@ -144,7 +154,7 @@ export class GitHubService {
                 };
             }
 
-            throw new Error('Could not parse GitHub remote URL');
+            throw new Error(`Could not parse GitHub remote URL: ${remoteUrl}`);
         } catch (error) {
             throw new Error('Could not find GitHub remote. Make sure you have a remote named "origin"');
         }
