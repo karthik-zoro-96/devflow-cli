@@ -161,15 +161,22 @@ prCommand
             const createSpinner = new Spinner('Creating pull request on GitHub...');
             createSpinner.start();
 
-            const pr = await github.createPullRequest({
-                title: finalTitle,
-                body: finalBody,
-                head: currentBranch,
-                base: baseBranch
-            });
+            try {
+                const pr = await github.createPullRequest({
+                    title: finalTitle,
+                    body: finalBody,
+                    head: currentBranch,
+                    base: baseBranch
+                });
+                createSpinner.succeed(chalk.green(`✨ Pull request created successfully!`));
+                console.log(chalk.cyan(`\n🔗 ${pr.html_url}\n`));
+            } catch (error) {
+                createSpinner.fail('Failed to create pull request');
+                console.log(chalk.red(`\n❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`));
+                process.exit(1);
+            }
 
-            createSpinner.succeed(chalk.green(`✨ Pull request created successfully!`));
-            console.log(chalk.cyan(`\n🔗 ${pr.html_url}\n`));
+
 
         } catch (error) {
             console.log(chalk.red(`\n❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`));

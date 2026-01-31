@@ -116,4 +116,23 @@ export class GitService {
     await this.git.push('origin', branchName, ['--set-upstream']);
   }
 
+  // Create and checkout a new branch
+  async createAndCheckoutBranch(branchName: string): Promise<void> {
+    try {
+      await this.git.checkoutLocalBranch(branchName);
+    } catch (error) {
+      throw new Error(`Failed to create branch: ${(error as Error).message}`);
+    }
+  }
+
+  // Check if branch already exists
+  async branchExists(branchName: string): Promise<boolean> {
+    try {
+      const branches = await this.git.branchLocal();
+      return branches.all.includes(branchName);
+    } catch {
+      return false;
+    }
+  }
+
 }
