@@ -274,4 +274,115 @@ Please test the changes thoroughly.`;
 
     return { title, body };
   }
+
+  async generateBranchName(
+    description: string,
+    type: string = 'feature',
+    issueNumber?: string
+  ): Promise<string> {
+    try {
+      const issuePrefix = issueNumber ? `${issueNumber}-` : '';
+
+      const prompt = `Generate a git branch name from this description: "${description}"
+  
+  Branch type: ${type}
+  ${issueNumber ? `Issue number: ${issueNumber}` : ''}
+  
+  Rules:
+  - Use format: ${type}/${issuePrefix}[descriptive-name]
+  - Use kebab-case (lowercase with hyphens)
+  - Keep it concise (max 50 chars)
+  - Be descriptive but brief
+  - Only alphanumeric and hyphens
+  
+  Example: feature/123-add-user-auth
+  
+  Respond with ONLY the branch name, nothing else.`;
+
+      // Write to temp file
+      const tmpFile = `/tmp/devflow-branch-${Date.now()}.txt`;
+      writeFileSync(tmpFile, prompt);
+
+      // console.log('🤖 Asking Copilot...\n');
+
+      const configService = new ConfigService();
+      const model = configService.getCopilotModel();
+
+      const { stdout } = await execAsync(
+        `copilot --model ${model} --prompt "$(cat ${tmpFile})"`,
+        {
+          maxBuffer: 1024 * 1024,
+          timeout: 30000,
+          shell: '/bin/bash'
+        }
+      );
+
+      // Clean up
+      try { unlinkSync(tmpFile); } catch { }
+
+      // Parse the branch name from response
+      let branchName = stdout.trim().split('\n')[0].trim();
+
+      // Remove any markdown formatting
+      branchName = branchName.replace(/```/g, '').replace(/`/g, '').trim();
+
+      // Remove quotes if present
+      branchName = branchName.replace(/^["']|["']$/g, '');
+
+      // Validate and sanitize
+      branchName = this.sanitizeBranchName(branchName, type, issuePrefix);
+
+      return branchName;
+
+    } catch (error) {
+      console.log('⚠️ Copilot error, generating fallback branch name', error);
+      return this.generateFallbackBranchName(description, type, issueNumber);
+    }
+  }
+
+  // Sanitize branch name
+  private sanitizeBranchName(name: string, type: string, issuePrefix: string): string {
+    // Remove type prefix if Copilot added it
+    name = name.replace(new RegExp(`^${type}/`, 'i'), '');
+
+    // Convert to lowercase and replace spaces/special chars with hyphens
+    name = name
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+
+    // Limit length
+    const maxLength = 50 - type.length - issuePrefix.length - 1;
+    if (name.length > maxLength) {
+      name = name.substring(0, maxLength).replace(/-$/, '');
+    }
+
+    return `${type}/${issuePrefix}${name}`;
+  }
+
+  // Fallback branch name generation
+  private generateFallbackBranchName(
+    description: string,
+    type: string,
+    issueNumber?: string
+  ): string {
+    const issuePrefix = issueNumber ? `${issueNumber}-` : '';
+
+    // Convert description to kebab-case
+    let name = description
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+
+    // Limit length
+    const maxLength = 50 - type.length - issuePrefix.length - 1;
+    if (name.length > maxLength) {
+      name = name.substring(0, maxLength).replace(/-$/, '');
+    }
+
+    return `${type}/${issuePrefix}${name}`;
+  }
 }

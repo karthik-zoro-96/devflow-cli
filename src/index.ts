@@ -8,6 +8,7 @@ import { commitCommand } from './commands/commit.js';
 import { prCommand } from './commands/pr.js';
 import { configCommand } from './commands/config.js';
 import { ConfigService } from './services/config.js';
+import { branchCommand } from './commands/branch.js';
 
 const program = new Command();
 
@@ -39,6 +40,7 @@ checkFirstRun();
 program.addCommand(commitCommand);
 program.addCommand(prCommand);
 program.addCommand(configCommand);
+program.addCommand(branchCommand);
 
 // Help message
 if (process.argv.length === 2) {
