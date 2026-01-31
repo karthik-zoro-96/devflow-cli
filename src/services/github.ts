@@ -2,6 +2,7 @@ import { Octokit } from '@octokit/rest';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { ConfigService } from './config';
+import chalk from 'chalk';
 
 const execAsync = promisify(exec);
 
@@ -31,6 +32,13 @@ export class GitHubService {
 
         this.octokit = new Octokit({ auth: token });
 
+        try {
+            const { owner, repo } = this.parseRemoteUrl();
+            console.log(chalk.dim(`✓ Connected to ${owner}/${repo}`));
+        } catch (parseError) {
+            throw new Error('Not a GitHub repository or no remote configured');
+        }
+
     }
 
 
@@ -41,6 +49,15 @@ export class GitHubService {
 
             let match;
 
+            // Try SSH format with custom host: git@github-personal:user/repo.git
+            match = url.match(/git@([^:]+):(.+?)\/(.+?)(\.git)?$/);
+
+            if (match) {
+                this.owner = match[2];
+                this.repo = match[3].replace('.git', '');
+                console.log(chalk.green('✓ Parsed:'), `${this.owner}/${this.repo}`);
+                return;
+            }
             // Try SSH format: git@github.com:user/repo.git
             match = url.match(/git@github\.com:(.+?)\/(.+?)(\.git)?$/);
 
@@ -124,6 +141,9 @@ export class GitHubService {
             const remoteUrl = execSync('git config --get remote.origin.url', {
                 encoding: 'utf-8'
             }).trim();
+
+            console.log(chalk.yellow('🔍 Debug - Remote URL:'), remoteUrl);  // ADD THIS
+
 
             console.log('Debug - Remote URL:', remoteUrl); // ADD THIS FOR DEBUGGING
 
