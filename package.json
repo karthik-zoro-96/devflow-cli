@@ -1,5 +1,5 @@
 {
-  "name": "@karthik-zoro-96/devflow",
+  "name": "git-devflow",
   "version": "1.0.0",
   "description": "AI-powered Git workflow automation using GitHub Copilot CLI",
   "main": "dist/index.js",
