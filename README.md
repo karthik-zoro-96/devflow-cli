@@ -9,8 +9,10 @@ AI-powered Git workflow automation using GitHub Copilot CLI. Streamline your dev
 - **🤖 Smart Commit Messages** - AI-generated conventional commit messages from your changes
 - **📝 PR Generation** - Automatic pull request descriptions with summary, changes, and testing notes
 - **🌿 Branch Naming** - Semantic branch names from GitHub issues or descriptions
-- **⚙️ Config Management** - Secure token storage and AI model selection (Haiku/Sonnet/GPT)
-- **🚀 Auto-Push** - Automatically push branches before creating PRs
+- **⚙️ Config Management** - Secure token storage with interactive setup wizard
+- **💰 Cost-Aware Model Selection** - Dynamically fetches available models from Copilot CLI with cost info
+- **🔄 Quota Auto-Retry** - Automatically falls back to a free model when premium requests are exhausted
+- **🔐 Security First** - Tokens never displayed, error messages sanitized, config file locked down
 
 ## 🎥 Demo
 
@@ -32,13 +34,16 @@ npm install -g devflow-cli
 ## 🔧 Setup
 
 ```bash
-# Run interactive setup
+# Run interactive setup (single source of truth - no .env file needed)
 devflow config setup
-
-# You'll be prompted for:
-# - GitHub Personal Access Token
-# - Preferred AI model (Sonnet 4.5 / Haiku 4.5 / GPT-4.1)
 ```
+
+The setup wizard will prompt you for:
+- **GitHub Personal Access Token** - for creating PRs and fetching issues
+- **Preferred AI model** - fetched dynamically from Copilot CLI with cost info
+- **Default base branch** - typically `main` or `develop`
+
+All config is stored securely in `~/.devflow/config.json` with restricted file permissions.
 
 ## 🎯 Usage
 
@@ -53,6 +58,11 @@ devflow commit
 
 # Or stage all changes automatically
 devflow commit -a
+```
+
+Each operation shows the model being used and its cost:
+```
+🤖 Model: claude-sonnet-4.5  Balanced  ·  1 premium request(s) per prompt
 ```
 
 ### Create Pull Requests
@@ -89,6 +99,9 @@ devflow config set copilotModel claude-haiku-4.5
 
 # Get config value
 devflow config get copilotModel
+
+# Re-run full setup wizard
+devflow config setup
 ```
 
 ## 🏗️ How It Works
@@ -99,27 +112,42 @@ DevFlow uses **GitHub Copilot CLI** as its AI engine:
 2. **PR Command**: Analyzes commits since branch point, generates structured PR description
 3. **Branch Command**: Fetches GitHub issue or uses description, generates semantic branch name
 
-When Copilot quota is exceeded, DevFlow gracefully falls back to intelligent rule-based generation.
+### Quota Handling
+
+When your premium request quota is exceeded, DevFlow automatically:
+1. Detects the quota error from the Copilot CLI
+2. Retries the request with a **free model** (`gpt-4.1`) at no cost
+3. Suggests switching your default model via `devflow config setup`
+
+If the free model also fails, DevFlow falls back to intelligent rule-based generation.
 
 ## 🎨 AI Model Selection
 
-Choose your preferred model during setup:
+During setup, models are **fetched dynamically** from the Copilot CLI — no hardcoded list. Each model is shown with its cost tier, sorted cheapest-first:
 
-- **Claude Sonnet 4.5** - Balanced speed and quality (default)
-- **Claude Haiku 4.5** - Faster, more cost-effective
-- **GPT-4.1** - Alternative AI model
+| Tier | Examples | Cost |
+|------|----------|------|
+| **Free** | `gpt-4.1`, `gpt-5-mini` | No premium requests |
+| **Cheap** | `claude-haiku-4.5`, `gpt-5.1-codex-mini` | 0.33x per prompt |
+| **Balanced** | `claude-sonnet-4.5`, `gpt-5.1-codex` | 1x per prompt |
+| **Expensive** | `claude-opus-4.5` | 3x per prompt |
+
+As GitHub adds or removes models, DevFlow automatically reflects the changes.
 
 ## 🔐 Security
 
-- GitHub tokens stored in `~/.devflow/config.json` with 600 file permissions
-- Never commits tokens to repositories
-- Respects existing environment variables (`GITHUB_TOKEN`, `GH_TOKEN`)
+- GitHub tokens stored in `~/.devflow/config.json` with **600 file permissions** (owner-only)
+- Tokens are **never displayed** in config output, error messages, or logs
+- Sensitive config keys are redacted in `config get` and `config set` output
+- Error messages are sanitized to prevent leaking auth headers or request details
+- No `.env` file required — config setup is the single source of truth
+- Environment variables (`GITHUB_TOKEN`, `GH_TOKEN`) supported as fallback for CI
 
 ## 📝 Requirements
 
 - Node.js 18+
 - Git
-- GitHub Copilot CLI (`gh extension install github/gh-copilot`)
+- [GitHub Copilot CLI](https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli) (`npm install -g @githubnext/github-copilot-cli`)
 - GitHub account with Copilot access
 
 ## Future Enhancements
