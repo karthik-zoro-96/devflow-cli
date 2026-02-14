@@ -139,7 +139,8 @@ export class CopilotService {
         .replace(/"/g, '\\"')
         .replace(/\n/g, '\\n');
 
-      const { stdout, stderr } = await execAsync(
+      // add stderr to get error messages and for debugging
+      const { stdout } = await execAsync(
         `copilot --prompt "${escapedPrompt}"`,
         {
           maxBuffer: 1024 * 1024,
@@ -147,14 +148,6 @@ export class CopilotService {
           shell: '/bin/bash'
         }
       );
-
-      console.log('Raw response:');
-      console.log(stdout);
-      console.log('---\n');
-
-      if (stderr) {
-        console.log('Stderr:', stderr);
-      }
 
       // Parse response
       const parsed = this.parsePRDescription(stdout);
