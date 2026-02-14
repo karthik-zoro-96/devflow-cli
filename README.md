@@ -14,7 +14,7 @@ AI-powered Git workflow automation using GitHub Copilot CLI. Streamline your dev
 
 ## 🎥 Demo
 
-<img width="1728" height="1117" alt="image" src="https://github.com/user-attachments/assets/8716f463-9591-42c2-996f-a4d342725b77" />
+<img width="1178" height="559" alt="image" src="https://github.com/user-attachments/assets/b1f49000-7ecd-4415-bf69-670c7a1c4b36" />
 
 <img width="1372" height="886" alt="image" src="https://github.com/user-attachments/assets/f04027fb-577d-4152-a9c4-2dfbdb3b6242" />
 
