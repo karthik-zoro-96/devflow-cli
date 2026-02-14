@@ -24,11 +24,10 @@ AI-powered Git workflow automation using GitHub Copilot CLI. Streamline your dev
 
 <img width="1372" height="886" alt="image" src="https://github.com/user-attachments/assets/1ad5c64d-5138-4d3d-b9a4-35a994be7383" />
 
-
 ## 📦 Installation
 
 ```bash
-npm install -g devflow-cli
+npm install -g git-devflow
 ```
 
 ## 🔧 Setup
@@ -39,6 +38,7 @@ devflow config setup
 ```
 
 The setup wizard will prompt you for:
+
 - **GitHub Personal Access Token** - for creating PRs and fetching issues
 - **Preferred AI model** - fetched dynamically from Copilot CLI with cost info
 - **Default base branch** - typically `main` or `develop`
@@ -61,6 +61,7 @@ devflow commit -a
 ```
 
 Each operation shows the model being used and its cost:
+
 ```
 🤖 Model: claude-sonnet-4.5  Balanced  ·  1 premium request(s) per prompt
 ```
@@ -115,6 +116,7 @@ DevFlow uses **GitHub Copilot CLI** as its AI engine:
 ### Quota Handling
 
 When your premium request quota is exceeded, DevFlow automatically:
+
 1. Detects the quota error from the Copilot CLI
 2. Retries the request with a **free model** (`gpt-4.1`) at no cost
 3. Suggests switching your default model via `devflow config setup`
@@ -125,12 +127,12 @@ If the free model also fails, DevFlow falls back to intelligent rule-based gener
 
 During setup, models are **fetched dynamically** from the Copilot CLI — no hardcoded list. Each model is shown with its cost tier, sorted cheapest-first:
 
-| Tier | Examples | Cost |
-|------|----------|------|
-| **Free** | `gpt-4.1`, `gpt-5-mini` | No premium requests |
-| **Cheap** | `claude-haiku-4.5`, `gpt-5.1-codex-mini` | 0.33x per prompt |
-| **Balanced** | `claude-sonnet-4.5`, `gpt-5.1-codex` | 1x per prompt |
-| **Expensive** | `claude-opus-4.5` | 3x per prompt |
+| Tier          | Examples                                 | Cost                |
+| ------------- | ---------------------------------------- | ------------------- |
+| **Free**      | `gpt-4.1`, `gpt-5-mini`                  | No premium requests |
+| **Cheap**     | `claude-haiku-4.5`, `gpt-5.1-codex-mini` | 0.33x per prompt    |
+| **Balanced**  | `claude-sonnet-4.5`, `gpt-5.1-codex`     | 1x per prompt       |
+| **Expensive** | `claude-opus-4.5`                        | 3x per prompt       |
 
 As GitHub adds or removes models, DevFlow automatically reflects the changes.
 

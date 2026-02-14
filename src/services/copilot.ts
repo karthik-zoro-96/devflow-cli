@@ -1,5 +1,8 @@
 import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
+import { readdirSync, readFileSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 import chalk from 'chalk';
 import { ConfigService } from './config';
 
@@ -42,26 +45,26 @@ interface ModelMeta {
 
 const MODEL_CATALOG: Record<string, ModelMeta> = {
   // Free / included models
-  'gpt-4.1':             { tag: 'Free',      description: 'Included with your plan, no extra cost',    multiplier: 0 },
-  'gpt-5-mini':          { tag: 'Free',      description: 'Included with your plan, fast and lightweight', multiplier: 0 },
+  'gpt-4.1': { tag: 'Free', description: 'Included with your plan, no extra cost', multiplier: 0 },
+  'gpt-5-mini': { tag: 'Free', description: 'Included with your plan, fast and lightweight', multiplier: 0 },
 
   // Cheap & fast
-  'claude-haiku-4.5':    { tag: 'Cheap',     description: 'Fastest responses, very low cost',          multiplier: 0.33 },
-  'gpt-5.1-codex-mini':  { tag: 'Cheap',     description: 'Fast code generation, very low cost',       multiplier: 0.33 },
+  'claude-haiku-4.5': { tag: 'Cheap', description: 'Fastest responses, very low cost', multiplier: 0.33 },
+  'gpt-5.1-codex-mini': { tag: 'Cheap', description: 'Fast code generation, very low cost', multiplier: 0.33 },
 
   // Balanced
-  'claude-sonnet-4':     { tag: 'Balanced',  description: 'Good quality, standard cost',               multiplier: 1 },
-  'claude-sonnet-4.5':   { tag: 'Balanced',  description: 'Great quality and speed, recommended',      multiplier: 1 },
-  'gpt-5':               { tag: 'Balanced',  description: 'Solid all-rounder, standard cost',          multiplier: 1 },
-  'gpt-5.1':             { tag: 'Balanced',  description: 'Latest GPT, good quality, standard cost',   multiplier: 1 },
-  'gpt-5.1-codex':       { tag: 'Balanced',  description: 'Optimized for code, standard cost',         multiplier: 1 },
-  'gpt-5.1-codex-max':   { tag: 'Balanced',  description: 'Max context for code, standard cost',       multiplier: 1 },
-  'gpt-5.2':             { tag: 'Balanced',  description: 'Newest GPT, standard cost',                 multiplier: 1 },
-  'gpt-5.2-codex':       { tag: 'Balanced',  description: 'Newest GPT for code, standard cost',        multiplier: 1 },
-  'gemini-3-pro-preview': { tag: 'Balanced', description: 'Google model, good for general tasks',      multiplier: 1 },
+  'claude-sonnet-4': { tag: 'Balanced', description: 'Good quality, standard cost', multiplier: 1 },
+  'claude-sonnet-4.5': { tag: 'Balanced', description: 'Great quality and speed, recommended', multiplier: 1 },
+  'gpt-5': { tag: 'Balanced', description: 'Solid all-rounder, standard cost', multiplier: 1 },
+  'gpt-5.1': { tag: 'Balanced', description: 'Latest GPT, good quality, standard cost', multiplier: 1 },
+  'gpt-5.1-codex': { tag: 'Balanced', description: 'Optimized for code, standard cost', multiplier: 1 },
+  'gpt-5.1-codex-max': { tag: 'Balanced', description: 'Max context for code, standard cost', multiplier: 1 },
+  'gpt-5.2': { tag: 'Balanced', description: 'Newest GPT, standard cost', multiplier: 1 },
+  'gpt-5.2-codex': { tag: 'Balanced', description: 'Newest GPT for code, standard cost', multiplier: 1 },
+  'gemini-3-pro-preview': { tag: 'Balanced', description: 'Google model, good for general tasks', multiplier: 1 },
 
   // Expensive / highest quality
-  'claude-opus-4.5':     { tag: 'Expensive', description: 'Best quality, slowest, costs 3x per prompt', multiplier: 3 },
+  'claude-opus-4.5': { tag: 'Expensive', description: 'Best quality, slowest, costs 3x per prompt', multiplier: 3 },
 };
 
 export class CopilotService {
@@ -123,16 +126,16 @@ export class CopilotService {
     const multiplier = meta?.multiplier;
 
     let costStr: string;
-    if (multiplier === 0)               costStr = chalk.green('free, no premium requests used');
-    else if (multiplier !== undefined)  costStr = chalk.yellow(`${multiplier} premium request(s) per prompt`);
-    else                                costStr = chalk.dim('unknown cost');
+    if (multiplier === 0) costStr = chalk.green('free, no premium requests used');
+    else if (multiplier !== undefined) costStr = chalk.yellow(`${multiplier} premium request(s) per prompt`);
+    else costStr = chalk.dim('unknown cost');
 
     const tagColor =
-      tag === 'Free'      ? chalk.green(tag) :
-      tag === 'Cheap'     ? chalk.cyan(tag) :
-      tag === 'Balanced'  ? chalk.yellow(tag) :
-      tag === 'Expensive' ? chalk.red(tag) :
-      chalk.dim(tag);
+      tag === 'Free' ? chalk.green(tag) :
+        tag === 'Cheap' ? chalk.cyan(tag) :
+          tag === 'Balanced' ? chalk.yellow(tag) :
+            tag === 'Expensive' ? chalk.red(tag) :
+              chalk.dim(tag);
 
     console.log(`🤖 Model: ${chalk.bold(model)}  ${tagColor}  ·  ${costStr}`);
   }
@@ -164,6 +167,52 @@ export class CopilotService {
   private printSwitchTip(): void {
     console.log(chalk.dim(`\n   Tip: To avoid this, switch your default model:`));
     console.log(chalk.dim(`   Run: `) + chalk.cyan('devflow config setup') + chalk.dim(' and pick a Free model.\n'));
+  }
+
+  /**
+   * Reads the most recent Copilot CLI log file and extracts error lines.
+   * Returns a brief, safe diagnostic string, or undefined if nothing useful found.
+   */
+  private readLatestCopilotLog(): string | undefined {
+    try {
+      const logDir = join(homedir(), '.copilot', 'logs');
+      const files = readdirSync(logDir)
+        .filter(f => f.startsWith('process-') && f.endsWith('.log'))
+        .sort()    // alphabetical sort on timestamp-based names => latest last
+        .reverse();
+
+      if (files.length === 0) return undefined;
+
+      const content = readFileSync(join(logDir, files[0]), 'utf-8');
+      const errorLines = content
+        .split('\n')
+        .filter(line => /\[ERROR\]/.test(line))
+        .map(line => line.replace(/.*\[ERROR\]\s*/, '').trim())
+        .filter(line => line.length > 0);
+
+      if (errorLines.length === 0) return undefined;
+
+      // Look for the most informative error
+      const modelError = errorLines.find(l => /failed to list models/i.test(l));
+      if (modelError) {
+        const statusMatch = modelError.match(/(\d{3})\s*$/);
+        const status = statusMatch ? statusMatch[1] : '';
+        if (status === '403') {
+          return 'Copilot access denied (403). Your subscription may have expired or your authentication needs refreshing. Run: copilot auth login';
+        }
+        if (status === '401') {
+          return 'Copilot authentication failed (401). Run: copilot auth login';
+        }
+        return `Copilot model loading failed: ${modelError}`;
+      }
+
+      // Return last error line (sanitized)
+      const last = errorLines[errorLines.length - 1];
+      const sanitized = last.replace(/ghp_[a-zA-Z0-9]+|gho_[a-zA-Z0-9]+|github_pat_[a-zA-Z0-9_]+/g, '***');
+      return sanitized.length < 200 ? sanitized : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -199,10 +248,18 @@ export class CopilotService {
         throw new Error('Copilot request timed out (60s). Try a faster model like gpt-4.1 or claude-haiku-4.5');
       }
 
+      // When stderr is empty (copilot often exits silently), check the log file
+      if (stderr.length === 0) {
+        const logDiag = this.readLatestCopilotLog();
+        if (logDiag) {
+          throw new Error(logDiag);
+        }
+      }
+
       // Pass through stderr if it's short and doesn't contain secrets
       const safeStderr = stderr.length > 0 && stderr.length < 200 && !/token|auth|key|secret|password/i.test(stderr)
         ? stderr
-        : `exit code ${exitCode || 'unknown'}`;
+        : `exit code ${exitCode || 'unknown'}. Check copilot auth: run "copilot auth login"`;
 
       throw new Error(`Copilot CLI error: ${safeStderr}`);
     }
