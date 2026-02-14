@@ -142,10 +142,6 @@ export class GitHubService {
                 encoding: 'utf-8'
             }).trim();
 
-            console.log(chalk.yellow('🔍 Debug - Remote URL:'), remoteUrl);  // ADD THIS
-
-
-            console.log('Debug - Remote URL:', remoteUrl); // ADD THIS FOR DEBUGGING
 
             // Handle SSH format with custom host: git@github-personal:owner/repo.git
             const sshCustomMatch = remoteUrl.match(/git@([^:]+):(.+?)\/(.+?)(\.git)?$/);
