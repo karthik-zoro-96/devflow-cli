@@ -61,7 +61,8 @@ branchCommand
                     }
                 } catch (error) {
                     spinner.fail('Failed to fetch issue');
-                    console.log(chalk.red(`\n❌ ${(error as Error).message}\n`));
+                    const safeMsg = error instanceof Error ? error.message : 'Could not fetch issue';
+                    console.log(chalk.red(`\n❌ ${safeMsg}\n`));
                     process.exit(1);
                 }
             }
@@ -126,7 +127,8 @@ branchCommand
             console.log(chalk.green(`\n✨ Successfully created branch: ${chalk.bold(branchName)}\n`));
 
         } catch (error) {
-            console.log(chalk.red(`\n❌ Error: ${(error as Error).message}\n`));
+            const safeMsg = error instanceof Error ? error.message : 'Something went wrong';
+            console.log(chalk.red(`\n❌ ${safeMsg}\n`));
             process.exit(1);
         }
     });

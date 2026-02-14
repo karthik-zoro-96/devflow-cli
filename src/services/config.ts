@@ -9,6 +9,8 @@ export interface DevFlowConfig {
     defaultBaseBranch?: string;
 }
 
+export const DEFAULT_COPILOT_MODEL = 'claude-sonnet-4.5';
+
 export class ConfigService {
     private configPath: string;
     private configDir: string;
@@ -93,7 +95,7 @@ export class ConfigService {
 
     // Get Copilot model preference
     getCopilotModel(): string {
-        return this.get('copilotModel') || 'claude-sonnet-4.5'; // Default
+        return this.get('copilotModel') || DEFAULT_COPILOT_MODEL;
     }
 
     // Display current config
@@ -105,11 +107,11 @@ export class ConfigService {
         console.log('');
 
         console.log(chalk.bold('GitHub Token:'), config.githubToken ?
-            chalk.green(`${config.githubToken.substring(0, 20)}...`) :
+            chalk.green('Configured') :
             chalk.yellow('Not set (using environment or gh CLI)'));
 
         console.log(chalk.bold('Copilot Model:'), config.copilotModel ||
-            chalk.dim('claude-sonnet-4.5 (default)'));
+            chalk.dim(`${DEFAULT_COPILOT_MODEL} (default)`));
 
         console.log(chalk.bold('Default Base Branch:'), config.defaultBaseBranch ||
             chalk.dim('main (default)'));

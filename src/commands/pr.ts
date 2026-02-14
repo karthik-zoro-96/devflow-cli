@@ -172,14 +172,16 @@ prCommand
                 console.log(chalk.cyan(`\n🔗 ${pr.html_url}\n`));
             } catch (error) {
                 createSpinner.fail('Failed to create pull request');
-                console.log(chalk.red(`\n❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`));
+                const safeMsg = error instanceof Error ? error.message : 'Unknown error';
+                console.log(chalk.red(`\n❌ ${safeMsg}`));
                 process.exit(1);
             }
 
 
 
         } catch (error) {
-            console.log(chalk.red(`\n❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`));
+            const safeMsg = error instanceof Error ? error.message : 'Something went wrong';
+            console.log(chalk.red(`\n❌ ${safeMsg}`));
             process.exit(1);
         }
     });
