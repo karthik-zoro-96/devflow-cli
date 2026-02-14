@@ -70,9 +70,12 @@ export class GitHubService {
                 this.owner = match[1];
                 this.repo = match[2].replace('.git', '');
             } else {
-                throw new Error('Could not parse GitHub repository from remote URL');
+                throw new Error('Could not parse GitHub repository from remote URL. Supported formats: SSH or HTTPS.');
             }
         } catch (error) {
+            if (error instanceof Error && error.message.startsWith('Could not parse')) {
+                throw error;
+            }
             throw new Error('Not a GitHub repository or no remote configured');
         }
     }
@@ -102,7 +105,10 @@ export class GitHubService {
             if (error.status === 404) {
                 throw new Error(`Issue #${issueNumber} not found`);
             }
-            throw new Error(`Failed to fetch issue: ${error.message}`);
+            if (error.status === 401 || error.status === 403) {
+                throw new Error('GitHub authentication failed. Check your token with: devflow config setup');
+            }
+            throw new Error(`Failed to fetch issue #${issueNumber} (HTTP ${error.status || 'unknown'})`);
         }
     }
     // Create a pull request
@@ -125,8 +131,14 @@ export class GitHubService {
             });
 
             return data;
-        } catch (error) {
-            throw new Error(`Failed to create pull request: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        } catch (error: any) {
+            if (error.status === 401 || error.status === 403) {
+                throw new Error('GitHub authentication failed. Check your token with: devflow config setup');
+            }
+            if (error.status === 422) {
+                throw new Error('Failed to create pull request. A PR may already exist for this branch, or the branch has no changes.');
+            }
+            throw new Error(`Failed to create pull request (HTTP ${error.status || 'unknown'})`);
         }
     }
 
@@ -170,7 +182,7 @@ export class GitHubService {
                 };
             }
 
-            throw new Error(`Could not parse GitHub remote URL: ${remoteUrl}`);
+            throw new Error('Could not parse GitHub remote URL. Supported formats: SSH (git@github.com:owner/repo) or HTTPS (https://github.com/owner/repo)');
         } catch (error) {
             throw new Error('Could not find GitHub remote. Make sure you have a remote named "origin"');
         }

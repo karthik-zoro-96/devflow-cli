@@ -1,16 +1,249 @@
-import { exec } from 'child_process';
-import { unlinkSync, writeFileSync } from 'fs';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
+import chalk from 'chalk';
 import { ConfigService } from './config';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+/** Models that are included with paid plans and don't consume premium requests. */
+const FREE_MODELS = ['gpt-4.1', 'gpt-5-mini'];
+const FREE_FALLBACK_MODEL = FREE_MODELS[0];
+
+/** Patterns that indicate the user has exceeded their premium request quota. */
+const QUOTA_ERROR_PATTERNS = [
+  /premium request/i,
+  /rate limit/i,
+  /quota/i,
+  /exceeded.*allowance/i,
+  /budget.*reached/i,
+  /limit.*reached/i,
+  /too many requests/i,
+  /429/,
+];
+
+export interface ModelInfo {
+  id: string;
+  tag: string;        // Short badge shown next to model name
+  description: string; // One-line plain-English summary
+}
+
+/**
+ * Model metadata sourced from GitHub Docs premium request multipliers:
+ * https://docs.github.com/en/copilot/reference/ai-models/supported-models#model-multipliers
+ *
+ * Maps CLI model IDs to user-friendly descriptions.
+ */
+interface ModelMeta {
+  tag: string;
+  description: string;
+  multiplier: number;  // premium requests consumed per prompt (0 = free)
+}
+
+const MODEL_CATALOG: Record<string, ModelMeta> = {
+  // Free / included models
+  'gpt-4.1':             { tag: 'Free',      description: 'Included with your plan, no extra cost',    multiplier: 0 },
+  'gpt-5-mini':          { tag: 'Free',      description: 'Included with your plan, fast and lightweight', multiplier: 0 },
+
+  // Cheap & fast
+  'claude-haiku-4.5':    { tag: 'Cheap',     description: 'Fastest responses, very low cost',          multiplier: 0.33 },
+  'gpt-5.1-codex-mini':  { tag: 'Cheap',     description: 'Fast code generation, very low cost',       multiplier: 0.33 },
+
+  // Balanced
+  'claude-sonnet-4':     { tag: 'Balanced',  description: 'Good quality, standard cost',               multiplier: 1 },
+  'claude-sonnet-4.5':   { tag: 'Balanced',  description: 'Great quality and speed, recommended',      multiplier: 1 },
+  'gpt-5':               { tag: 'Balanced',  description: 'Solid all-rounder, standard cost',          multiplier: 1 },
+  'gpt-5.1':             { tag: 'Balanced',  description: 'Latest GPT, good quality, standard cost',   multiplier: 1 },
+  'gpt-5.1-codex':       { tag: 'Balanced',  description: 'Optimized for code, standard cost',         multiplier: 1 },
+  'gpt-5.1-codex-max':   { tag: 'Balanced',  description: 'Max context for code, standard cost',       multiplier: 1 },
+  'gpt-5.2':             { tag: 'Balanced',  description: 'Newest GPT, standard cost',                 multiplier: 1 },
+  'gpt-5.2-codex':       { tag: 'Balanced',  description: 'Newest GPT for code, standard cost',        multiplier: 1 },
+  'gemini-3-pro-preview': { tag: 'Balanced', description: 'Google model, good for general tasks',      multiplier: 1 },
+
+  // Expensive / highest quality
+  'claude-opus-4.5':     { tag: 'Expensive', description: 'Best quality, slowest, costs 3x per prompt', multiplier: 3 },
+};
 
 export class CopilotService {
 
+  /**
+   * Fetches available models from the Copilot CLI by parsing `copilot --help` output,
+   * enriched with cost/multiplier metadata from GitHub's published rates.
+   * Falls back to a minimal hardcoded list if the CLI is unavailable or parsing fails.
+   */
+  async fetchAvailableModels(): Promise<ModelInfo[]> {
+    let modelIds: string[];
+
+    try {
+      const { stdout } = await execAsync('copilot --help', {
+        timeout: 10000,
+        shell: '/bin/bash'
+      });
+
+      // Extract model choices from the --model flag description
+      // Format: --model <model>  Set the AI model to use (choices: "model1", "model2", ...)
+      const modelSection = stdout.match(/--model\s+<model>\s+[\s\S]*?\(choices:\s*([\s\S]*?)\)/);
+      if (modelSection) {
+        const parsed = modelSection[1]
+          .match(/"([^"]+)"/g)
+          ?.map(m => m.replace(/"/g, ''));
+
+        modelIds = parsed && parsed.length > 0 ? parsed : this.getFallbackModelIds();
+      } else {
+        modelIds = this.getFallbackModelIds();
+      }
+    } catch {
+      modelIds = this.getFallbackModelIds();
+    }
+
+    return modelIds.map(id => {
+      const info = MODEL_CATALOG[id];
+      return {
+        id,
+        tag: info?.tag ?? 'New',
+        description: info?.description ?? 'Recently added model',
+      };
+    });
+  }
+
+  private getFallbackModelIds(): string[] {
+    return [
+      'claude-sonnet-4.5',
+      'claude-haiku-4.5',
+      'gpt-4.1'
+    ];
+  }
+
+  /**
+   * Prints the model name and its cost before a Copilot call.
+   */
+  private printModelCost(model: string): void {
+    const meta = MODEL_CATALOG[model];
+    const tag = meta?.tag ?? 'Unknown';
+    const multiplier = meta?.multiplier;
+
+    let costStr: string;
+    if (multiplier === 0)               costStr = chalk.green('free, no premium requests used');
+    else if (multiplier !== undefined)  costStr = chalk.yellow(`${multiplier} premium request(s) per prompt`);
+    else                                costStr = chalk.dim('unknown cost');
+
+    const tagColor =
+      tag === 'Free'      ? chalk.green(tag) :
+      tag === 'Cheap'     ? chalk.cyan(tag) :
+      tag === 'Balanced'  ? chalk.yellow(tag) :
+      tag === 'Expensive' ? chalk.red(tag) :
+      chalk.dim(tag);
+
+    console.log(`🤖 Model: ${chalk.bold(model)}  ${tagColor}  ·  ${costStr}`);
+  }
+
+  /**
+   * Checks whether an error from the Copilot CLI looks like a quota/rate-limit issue.
+   */
+  private isQuotaError(error: Error): boolean {
+    const msg = error.message || '';
+    return QUOTA_ERROR_PATTERNS.some(p => p.test(msg));
+  }
+
+  /**
+   * Prints a user-friendly warning when quota is exceeded and we're retrying
+   * with a free model.
+   */
+  private printQuotaWarning(currentModel: string): void {
+    console.log('');
+    console.log(chalk.yellow('⚠️  Premium request limit reached for ') + chalk.bold(currentModel));
+    console.log(chalk.dim('   Your monthly quota may be exhausted or the model is rate-limited.'));
+    console.log(chalk.cyan(`   Retrying with ${FREE_FALLBACK_MODEL} (free, no premium requests)...\n`));
+    this.printModelCost(FREE_FALLBACK_MODEL);
+  }
+
+  /**
+   * Prints a tip after a successful free-model retry so the user knows
+   * how to permanently switch.
+   */
+  private printSwitchTip(): void {
+    console.log(chalk.dim(`\n   Tip: To avoid this, switch your default model:`));
+    console.log(chalk.dim(`   Run: `) + chalk.cyan('devflow config setup') + chalk.dim(' and pick a Free model.\n'));
+  }
+
+  /**
+   * Runs a prompt against the Copilot CLI with the given model.
+   * Returns stdout on success, or throws on failure.
+   */
+  private async execCopilotPrompt(prompt: string, model: string): Promise<string> {
+    try {
+      // Build args array — passed directly to the binary, no shell interpretation.
+      // This avoids issues with $, backticks, quotes etc. in diff content.
+      const args: string[] = [];
+      if (model) {
+        args.push('--model', model);
+      }
+      args.push('-s', '--prompt', prompt);
+
+      const { stdout } = await execFileAsync('copilot', args, {
+        maxBuffer: 1024 * 1024,
+        timeout: 60000,
+      });
+
+      return stdout;
+    } catch (error: any) {
+      // Build a safe error message without leaking sensitive data
+      const stderr = (error.stderr || '').trim();
+      const code = error.code;
+      const exitCode = error.status ?? error.code;
+
+      if (code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+        throw new Error('Copilot response exceeded buffer size');
+      }
+      if (error.killed) {
+        throw new Error('Copilot request timed out (60s). Try a faster model like gpt-4.1 or claude-haiku-4.5');
+      }
+
+      // Pass through stderr if it's short and doesn't contain secrets
+      const safeStderr = stderr.length > 0 && stderr.length < 200 && !/token|auth|key|secret|password/i.test(stderr)
+        ? stderr
+        : `exit code ${exitCode || 'unknown'}`;
+
+      throw new Error(`Copilot CLI error: ${safeStderr}`);
+    }
+  }
+
+  /**
+   * Runs a prompt with the user's configured model.
+   * Shows cost info before the call.
+   * If a quota/rate-limit error is detected, automatically retries with a free model.
+   */
+  private async execWithQuotaRetry(prompt: string): Promise<string> {
+    const configService = new ConfigService();
+    const model = configService.getCopilotModel();
+    const isFreeModel = FREE_MODELS.includes(model);
+
+    // Show model + cost before making the call
+    this.printModelCost(model);
+    console.log('');
+
+    try {
+      return await this.execCopilotPrompt(prompt, model);
+    } catch (error) {
+      // If already on a free model, no point retrying — just throw
+      if (isFreeModel) throw error;
+
+      // If it looks like a quota issue, retry with the free model
+      if (this.isQuotaError(error as Error)) {
+        this.printQuotaWarning(model);
+
+        const result = await this.execCopilotPrompt(prompt, FREE_FALLBACK_MODEL);
+        this.printSwitchTip();
+        return result;
+      }
+
+      // Some other error — let it bubble up
+      throw error;
+    }
+  }
 
   async generateCommitMessage(diff: string): Promise<string[]> {
     try {
-      // Simple prompt
       const prompt = `Generate 3 commit messages for these git changes. Use conventional commits format (feat/fix/chore/etc).
   
   Changes:
@@ -23,30 +256,7 @@ export class CopilotService {
   
   Keep each under 72 characters.`;
 
-      // Write to temp file to avoid shell escaping issues
-      const tmpFile = `/tmp/devflow-commit-${Date.now()}.txt`;
-      writeFileSync(tmpFile, prompt);
-
-      const configService = new ConfigService();
-      const model = configService.getCopilotModel();
-
-      // Build the command with model flag only if it's not the default
-      const modelFlag = model ? `--model ${model}` : '';
-
-      console.log('\n🤖 Calling Copilot CLI...\n');
-
-      // Use --prompt with file input
-      const { stdout } = await execAsync(
-        `copilot ${modelFlag} --prompt "$(cat ${tmpFile})"`,
-        {
-          maxBuffer: 1024 * 1024,
-          timeout: 30000,
-          shell: '/bin/bash'
-        }
-      );
-
-      // Clean up
-      try { unlinkSync(tmpFile); } catch { }
+      const stdout = await this.execWithQuotaRetry(prompt);
 
       // Parse messages
       const messages = this.parseCommitMessages(stdout);
@@ -58,7 +268,9 @@ export class CopilotService {
       return this.generateFallbackMessages(diff);
 
     } catch (error) {
-      console.log('⚠️ Copilot error:', (error as Error).message);
+      const reason = error instanceof Error ? error.message : 'unknown error';
+      console.log(chalk.yellow(`⚠️  ${reason}`));
+      console.log(chalk.dim('   Using fallback suggestions\n'));
       return this.generateFallbackMessages(diff);
     }
   }
@@ -128,26 +340,9 @@ export class CopilotService {
     try {
       const commitList = commits.map(c => `- ${c.message}`).join('\n');
 
-      // Shorter, simpler prompt
       const prompt = `Generate a PR title and description for these commits:\n${commitList}\n\nFormat:\nTITLE: [title]\nBODY:\n[description]`;
 
-      console.log('\n🤖 Asking Copilot CLI...\n');
-
-      // Use --prompt flag (non-interactive)
-      const escapedPrompt = prompt
-        .replace(/\\/g, '\\\\')
-        .replace(/"/g, '\\"')
-        .replace(/\n/g, '\\n');
-
-      // add stderr to get error messages and for debugging
-      const { stdout } = await execAsync(
-        `copilot --prompt "${escapedPrompt}"`,
-        {
-          maxBuffer: 1024 * 1024,
-          timeout: 30000,
-          shell: '/bin/bash'
-        }
-      );
+      const stdout = await this.execWithQuotaRetry(prompt);
 
       // Parse response
       const parsed = this.parsePRDescription(stdout);
@@ -161,8 +356,9 @@ export class CopilotService {
       return this.generateSmartFallback(commits, issueContext);
 
     } catch (error) {
-      console.log('⚠️ Copilot error:', (error as Error).message);
-      console.log('Using smart fallback\n');
+      const reason = error instanceof Error ? error.message : 'unknown error';
+      console.log(chalk.yellow(`⚠️  ${reason}`));
+      console.log(chalk.dim('   Using fallback PR description\n'));
       return this.generateSmartFallback(commits, issueContext);
     }
   }
@@ -292,26 +488,7 @@ Please test the changes thoroughly.`;
   
   Respond with ONLY the branch name, nothing else.`;
 
-      // Write to temp file
-      const tmpFile = `/tmp/devflow-branch-${Date.now()}.txt`;
-      writeFileSync(tmpFile, prompt);
-
-      // console.log('🤖 Asking Copilot...\n');
-
-      const configService = new ConfigService();
-      const model = configService.getCopilotModel();
-
-      const { stdout } = await execAsync(
-        `copilot --model ${model} --prompt "$(cat ${tmpFile})"`,
-        {
-          maxBuffer: 1024 * 1024,
-          timeout: 30000,
-          shell: '/bin/bash'
-        }
-      );
-
-      // Clean up
-      try { unlinkSync(tmpFile); } catch { }
+      const stdout = await this.execWithQuotaRetry(prompt);
 
       // Parse the branch name from response
       let branchName = stdout.trim().split('\n')[0].trim();
@@ -328,7 +505,9 @@ Please test the changes thoroughly.`;
       return branchName;
 
     } catch (error) {
-      console.log('⚠️ Copilot error, generating fallback branch name', error);
+      const reason = error instanceof Error ? error.message : 'unknown error';
+      console.log(chalk.yellow(`⚠️  ${reason}`));
+      console.log(chalk.dim('   Using fallback branch name\n'));
       return this.generateFallbackBranchName(description, type, issueNumber);
     }
   }

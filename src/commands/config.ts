@@ -1,7 +1,8 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { input, select, confirm, password } from '@inquirer/prompts';
-import { ConfigService } from '../services/config.js';
+import { ConfigService, DEFAULT_COPILOT_MODEL } from '../services/config.js';
+import { CopilotService } from '../services/copilot.js';
 
 export const configCommand = new Command('config')
     .description('Configure DevFlow settings');
@@ -41,27 +42,37 @@ configCommand
                 config.set('githubToken', token);
             }
 
-            // Copilot Model Selection
+            // Copilot Model Selection - fetch available models dynamically
+            const copilot = new CopilotService();
+            console.log(chalk.dim('Fetching available models from Copilot CLI...\n'));
+            const availableModels = await copilot.fetchAvailableModels();
+
+            // Sort: Free first, then Cheap, Balanced, Expensive, New
+            const tagOrder: Record<string, number> = {
+                'Free': 0, 'Cheap': 1, 'Balanced': 2, 'Expensive': 3, 'New': 4
+            };
+            const sorted = [...availableModels].sort((a, b) =>
+                (tagOrder[a.tag] ?? 99) - (tagOrder[b.tag] ?? 99)
+            );
+
+            const tagColor = (tag: string): string => {
+                switch (tag) {
+                    case 'Free':      return chalk.green(tag);
+                    case 'Cheap':     return chalk.cyan(tag);
+                    case 'Balanced':  return chalk.yellow(tag);
+                    case 'Expensive': return chalk.red(tag);
+                    default:          return chalk.dim(tag);
+                }
+            };
+
             const model = await select({
                 message: 'Select your preferred Copilot model:',
-                choices: [
-                    {
-                        name: 'Claude Sonnet 4.5 (Balanced - Recommended)',
-                        value: 'claude-sonnet-4.5',
-                        description: 'Good balance of speed and quality'
-                    },
-                    {
-                        name: 'Claude Haiku 4.5 (Faster, cheaper)',
-                        value: 'claude-haiku-4.5',
-                        description: 'Faster responses, lower cost'
-                    },
-                    {
-                        name: 'GPT-4.1 (Alternative)',
-                        value: 'gpt-4.1',
-                        description: 'OpenAI model'
-                    }
-                ],
-                default: currentConfig.copilotModel || 'claude-sonnet-4.5'
+                choices: sorted.map(m => ({
+                    name: `${m.id}  ${tagColor(m.tag)}`,
+                    value: m.id,
+                    description: m.description
+                })),
+                default: currentConfig.copilotModel || DEFAULT_COPILOT_MODEL
             });
             config.set('copilotModel', model);
 
@@ -90,6 +101,9 @@ configCommand
         config.display();
     });
 
+// Keys that should never have their values printed
+const SENSITIVE_KEYS = ['githubToken'];
+
 // Set individual values
 configCommand
     .command('set <key> <value>')
@@ -105,7 +119,12 @@ configCommand
         }
 
         config.set(key as any, value);
-        console.log(chalk.green(`✓ Set ${key} = ${value}`));
+
+        if (SENSITIVE_KEYS.includes(key)) {
+            console.log(chalk.green(`✓ ${key} updated`));
+        } else {
+            console.log(chalk.green(`✓ Set ${key} = ${value}`));
+        }
     });
 
 // Get individual values
@@ -116,9 +135,14 @@ configCommand
         const config = new ConfigService();
         const value = config.get(key as any);
 
-        if (value) {
-            console.log(value);
-        } else {
+        if (!value) {
             console.log(chalk.yellow(`${key} is not set`));
+            return;
+        }
+
+        if (SENSITIVE_KEYS.includes(key)) {
+            console.log(chalk.green('Configured'));
+        } else {
+            console.log(value);
         }
     });
