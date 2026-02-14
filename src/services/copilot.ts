@@ -1,7 +1,7 @@
 import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import chalk from 'chalk';
-import { ConfigService, DEFAULT_COPILOT_MODEL } from './config';
+import { ConfigService } from './config';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
